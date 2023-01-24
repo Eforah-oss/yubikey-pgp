@@ -20,6 +20,14 @@ ykpgp_ensure_name() {
     fi
 }
 
+ykpgp_use_temp_gnupghome() {
+    export GNUPGHOME="$(mktemp -d)"
+    chmod og-rwx "$GNUPGHOME"
+    gpg --list-keys >/dev/null 2>&1
+    exit_trap() { gpg --list-keys; rm -r "$GNUPGHOME"; }
+    trap exit_trap EXIT
+}
+
 ykpgp_help() {
     printf '%s\n' \
         'Usage: ykpgp [options...] <command>' \
@@ -69,16 +77,8 @@ ykpgp() {
     [ "$1" != --help ] || set -- help
     while getopts 'hn' OPT "$@"; do
         case "$OPT" in
-        h)
-            set -- help
-            ;;
-        n)
-            export GNUPGHOME="$(mktemp -d)"
-            chmod og-rwx "$GNUPGHOME"
-            gpg --list-keys >/dev/null 2>&1
-            exit_trap() { gpg --list-keys; rm -r "$GNUPGHOME"; }
-            trap exit_trap EXIT
-            ;;
+            h) set -- help ;;
+            n) ykpgp_use_temp_gnupghome ;;
         esac
     done
     shift $(( $OPTIND - 1 ))
