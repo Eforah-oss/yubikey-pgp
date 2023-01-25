@@ -28,6 +28,17 @@ ykpgp_use_temp_gnupghome() {
     trap exit_trap EXIT
 }
 
+ykpgp_set_algo() { #1: S_algo E_algo A_algo
+    #Set key algorithm only if necessary to avoid pin dialogs
+    if ! gpg --card-status | grep -qxF "Key attributes ...: $1 $2 $3"; then
+        printf "%s\n" admin key-attr \
+                $(expr "$1" : rsa && echo 1 "${1#rsa}" || echo 2 1) \
+                $(expr "$2" : rsa && echo 1 "${2#rsa}" || echo 2 1) \
+                $(expr "$3" : rsa && echo 1 "${3#rsa}" || echo 2 1) \
+            | gpg --command-fd=0 --status-fd=1 --expert --card-edit
+    fi
+}
+
 ykpgp_help() {
     printf '%s\n' \
         'Usage: ykpgp [options...] <command>' \
@@ -40,6 +51,7 @@ ykpgp_help() {
         'Commands:' \
         '  register  Import keys from YubiKey for use with gpg' \
         '  init      Initialise the YubiKey' \
+        '    -r      Create RSA keys instead of ECC' \
         '  reset     Clear (factory-reset) all OpenPGP data on YubiKey'
 }
 
@@ -60,7 +72,19 @@ ykpgp_register() {
 }
 
 ykpgp_init() {
+    unset rsa
+    while getopts 'nr' OPT "$@"; do
+        case "$OPT" in
+            n) ykpgp_use_temp_gnupghome ;;
+            r) rsa=true ;;
+        esac
+    done
+    shift $(( $OPTIND - 1 ))
     ykpgp_ensure_name
+    ykpgp_set_algo \
+        "$("${rsa-false}" && echo rsa4096 || echo ed25519)" \
+        "$("${rsa-false}" && echo rsa4096 || echo cv25519)" \
+        "$("${rsa-false}" && echo rsa4096 || echo ed25519)"
     replace="$(gpg --card-status | sed -n '/^\s*created ....:/{a\y
         }')"
     printf "%s\n" admin generate n $replace 0 y "$NAME" "$EMAIL" "" \
