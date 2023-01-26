@@ -28,14 +28,20 @@ ykpgp_use_temp_gnupghome() {
     trap exit_trap EXIT
 }
 
+ykpgp_gpg_commands() { #1: fingerprint or --card-edit
+    (shift 1; printf "%s\\n" "$@") \
+        | gpg --command-fd=0 --status-fd=1 --expert \
+            $([ "$1" = --card-edit ] || echo --key-edit) "$1"
+}
+
 ykpgp_set_algo() { #1: S_algo E_algo A_algo
     #Set key algorithm only if necessary to avoid pin dialogs
     if ! gpg --card-status | grep -qxF "Key attributes ...: $1 $2 $3"; then
-        printf "%s\n" admin key-attr \
-                $(expr "$1" : rsa && echo 1 "${1#rsa}" || echo 2 1) \
-                $(expr "$2" : rsa && echo 1 "${2#rsa}" || echo 2 1) \
-                $(expr "$3" : rsa && echo 1 "${3#rsa}" || echo 2 1) \
-            | gpg --command-fd=0 --status-fd=1 --expert --card-edit
+        ykpgp_gpg_commands --card-edit \
+            admin key-attr \
+            $(expr "$1" : rsa && echo 1 "${1#rsa}" || echo 2 1) \
+            $(expr "$2" : rsa && echo 1 "${2#rsa}" || echo 2 1) \
+            $(expr "$3" : rsa && echo 1 "${3#rsa}" || echo 2 1)
     fi
 }
 
@@ -87,14 +93,13 @@ ykpgp_init() {
         "$("${rsa-false}" && echo rsa4096 || echo ed25519)"
     replace="$(gpg --card-status | sed -n '/^\s*created ....:/{a\y
         }')"
-    printf "%s\n" admin generate n $replace 0 y "$NAME" "$EMAIL" "" \
-        | gpg --command-fd=0 --status-fd=1 --expert --card-edit
+    ykpgp_gpg_commands --card-edit \
+        admin generate n $replace 0 y "$NAME" "$EMAIL" ""
 }
 
 ykpgp_reset() {
     confirm "ARE YOU SURE? This is impossible to undo." || return
-    printf "%s\n" admin factory-reset y yes \
-        | gpg --command-fd=0 --status-fd=1 --expert --card-edit
+    ykpgp_gpg_commands --card-edit admin factory-reset y yes
 }
 
 ykpgp() {
