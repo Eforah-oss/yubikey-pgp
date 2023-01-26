@@ -87,6 +87,15 @@ ykpgp_init() {
     done
     shift $(( $OPTIND - 1 ))
     ykpgp_ensure_name
+    #Splitting given and surname is imperfect, so only set if unset
+    if [ "$(gpg --card-status \
+            | sed -n 's/Name of cardholder: //p')" = "[not set]" ]; then
+        us="$(printf '\037')"; #ASCII Unit Separator
+        split_name="$(echo "$NAME" \
+            | sed 's/ \(\([^[:upper:]]* \)*[[:upper:]][^ ]*\)$/'"$us"'\1/')"
+        ykpgp_gpg_commands --card-edit \
+            admin name "${split_name#*$us}" "${split_name%$us*}"
+    fi
     ykpgp_set_algo \
         "$("${rsa-false}" && echo rsa4096 || echo ed25519)" \
         "$("${rsa-false}" && echo rsa4096 || echo cv25519)" \
