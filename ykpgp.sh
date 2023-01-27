@@ -120,6 +120,8 @@ ykpgp() {
         esac
     done
     shift $(( $OPTIND - 1 ))
+    mkdir -p "$GNUPGHOME"
+    chmod og-rwx "$GNUPGHOME"
     case "$1" in
         help) shift 1; ykpgp_help ;;
         register) shift 1; ykpgp_register "$@" ;;
