@@ -162,10 +162,11 @@ ykpgp_reset() {
 }
 
 ykpgp() {
+    [ "$#" -gt 0 ] || set -- help
     [ "$1" != --help ] || set -- help
     while getopts 'hn' OPT "$@"; do
         case "$OPT" in
-            h) set -- help ;;
+            h) set -- help; OPTIND=0 ;;
             n) ykpgp_use_temp_gnupghome ;;
         esac
     done
