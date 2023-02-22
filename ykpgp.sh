@@ -94,7 +94,7 @@ ykpgp_init() {
             r) rsa=true ;;
         esac
     done
-    shift $(( $OPTIND - 1 ))
+    shift $(( $OPTIND - 1 )); OPTIND=1
     ykpgp_ensure_name
     #Splitting given and surname is imperfect, so only set if unset
     if [ "$(gpg --card-status \
@@ -167,11 +167,11 @@ ykpgp() {
     [ "$1" != --help ] || set -- help
     while getopts 'hn' OPT "$@"; do
         case "$OPT" in
-            h) set -- help; OPTIND=0 ;;
+            h) set -- help; OPTIND=1 ;;
             n) ykpgp_use_temp_gnupghome ;;
         esac
     done
-    shift $(( $OPTIND - 1 ))
+    shift $(( $OPTIND - 1 )); OPTIND=1
     mkdir -p "$GNUPGHOME"
     chmod og-rwx "$GNUPGHOME"
     case "$1" in
