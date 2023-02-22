@@ -80,6 +80,7 @@ ykpgp_register() {
     #Adds the [SC] (meaning sign and certify) key and [E] (encryption) subkey
     gpg --faked-system-time "$date" --quick-gen-key "$NAME <$EMAIL>" card
     fingerprint="$(ykpgp_get_gpg_fingerprint "$NAME <$EMAIL>")"
+    gpg --quick-set-expire "$fingerprint" 0
     #Adds the [A] (auth) subkey
     gpg --faked-system-time "$date" --quick-add-key "$fingerprint" card auth
 }
