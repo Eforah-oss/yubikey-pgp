@@ -10,6 +10,7 @@ confirm() ( #1: prompt
 )
 
 ykpgp_ensure_name() {
+    [ -z "${uids-}" ] || return 0
     if [ -z "${NAME-}" ]; then
         printf 'Full name? (Consider setting $NAME in your ~/.bashrc): '
         read -r NAME
@@ -18,6 +19,7 @@ ykpgp_ensure_name() {
         printf 'Email? (Consider setting $EMAIL in your ~/.bashrc): '
         read -r EMAIL
     fi
+    uids="$NAME <$EMAIL>"
 }
 
 ykpgp_use_temp_gnupghome() {
@@ -41,6 +43,15 @@ ykpgp_get_gpg_fingerprint() { #1: uid
     echo "$1"
 }
 
+ykpgp_get_card_fingerprint() { #1: serialno
+    set -- "$(gpg --with-colons --list-secret-keys | awk -F: -vserialno="$1" '
+        /^sec:/ { oncard = index($15, serialno) }
+        /^fpr:/ { if (oncard) { print $10; exit; } }
+    ')"
+    [ -n "$1" ] || return 1
+    echo "$1"
+}
+
 ykpgp_set_algo() { #1: S_algo E_algo A_algo
     #Set key algorithm only if necessary to avoid pin dialogs
     if ! gpg --card-status | grep -qxF "Key attributes ...: $1 $2 $3"; then
@@ -52,6 +63,21 @@ ykpgp_set_algo() { #1: S_algo E_algo A_algo
     fi
 }
 
+ykpgp_set_uids() { #1: fingerprint
+    set -- "$1" "$(gpg --with-colons --list-secret-keys "$1" \
+        | awk -F: '/^uid/ { print $10; exit }')"
+    echo "$uids" | while read -r uid; do
+        gpg --with-colons --list-secret-keys "$1" \
+            | grep '^uid' | grep -qF "$uid" \
+            || gpg --quick-add-uid "$1" "$uid"
+    done
+    #If adding uids has changed the primary, set it back to the original value
+    gpg --with-colons --list-secret-keys "$1" \
+        | awk -F: '/^uid/ { print $10; exit }' \
+        | grep -qxF "$2" \
+        || gpg --quick-set-primary-uid "$1" "$2"
+}
+
 ykpgp_help() {
     printf '%s\n' \
         'Usage: ykpgp [options...] <command>' \
@@ -60,6 +86,9 @@ ykpgp_help() {
         '' \
         'Options:' \
         '  -n        Use temporary GNUPGHOME. Mostly for testing' \
+        '  -i <uid>  Add uid (e.g., `name <mail@example.com`) to key' \
+        '            Can be specified multiple times. First is primary' \
+        '            If none are given, default is "$NAME <$EMAIL>"' \
         '' \
         'Commands:' \
         '  register  Import keys from YubiKey for use with gpg' \
@@ -79,17 +108,20 @@ ykpgp_register() {
         s/.*\([-0-9 :]\{19\}\)$/\1/;s/ /T/;s/$/!/;s/[-:]//g;p;q}')"
     [ -n "$date" ] || die "Could not find keys on card"
     #Adds the [SC] (meaning sign and certify) key and [E] (encryption) subkey
-    gpg --faked-system-time "$date" --quick-gen-key "$NAME <$EMAIL>" card
-    fingerprint="$(ykpgp_get_gpg_fingerprint "$NAME <$EMAIL>")"
+    gpg --faked-system-time "$date" --quick-gen-key \
+        "$(echo "$uids" | head -n 1)" card
+    fingerprint="$(ykpgp_get_gpg_fingerprint "$(echo "$uids" | head -n1)")"
     gpg --quick-set-expire "$fingerprint" 0
     #Adds the [A] (auth) subkey
     gpg --faked-system-time "$date" --quick-add-key "$fingerprint" card auth
+    ykpgp_set_uids "$fingerprint"
 }
 
 ykpgp_init() {
     unset rsa
-    while getopts 'knr' OPT "$@"; do
+    while getopts 'i:knr' OPT "$@"; do
         case "$OPT" in
+            i) uids="${uids-}$(printf "${uids+\\n}%s" "$OPTARG")" ;;
             k) stored_keyring_key=true ;;
             n) ykpgp_use_temp_gnupghome ;;
             r) rsa=true ;;
@@ -100,17 +132,20 @@ ykpgp_init() {
     #Splitting given and surname is imperfect, so only set if unset
     if gpg --with-colons --card-status | grep -qFx name:::; then
         us="$(printf '\037')"; #ASCII Unit Separator
-        split_name="$(echo "$NAME" \
-            | sed 's/ \(\([^[:upper:]]* \)*[[:upper:]][^ ]*\)$/'"$us"'\1/')"
+        split_name="$(echo "$uids" | sed '
+                1!d
+                s/ <[^>]*>$//
+                s/ \(\([^[:upper:]]* \)*[[:upper:]][^ ]*\)$/'"$us"'\1/
+            ')"
         ykpgp_gpg_commands --card-edit \
             admin name "${split_name#*$us}" "${split_name%$us*}"
     fi
     if "${stored_keyring_key-false}"; then
         #If there is no key in the keyring yet, create it
-        ykpgp_get_gpg_fingerprint "$NAME <$EMAIL>" >/dev/null \
-            || gpg --quick-gen-key "$NAME <$EMAIL>" \
+        ykpgp_get_gpg_fingerprint "$(echo "$uids" | head -n 1)" >/dev/null \
+            || gpg --quick-gen-key "$(echo "$uids" | head -n 1)" \
                 "$("${rsa-false}" && echo rsa4096 || echo ed25519)" sign,cert 0
-        fingerprint="$(ykpgp_get_gpg_fingerprint "$NAME <$EMAIL>")"
+        fingerprint="$(ykpgp_get_gpg_fingerprint "$(echo "$uids" | head -n1)")"
         gpg --with-colons --list-secret-keys "$fingerprint" \
             | awk -F: '$1 == "ssb" && $12 == "e" { f = 1 } END { exit !f }' \
             || gpg --quick-add-key "$fingerprint" \
@@ -119,6 +154,7 @@ ykpgp_init() {
             | awk -F: '$1 == "ssb" && $12 == "a" { f = 1 } END { exit !f }' \
             || gpg --quick-add-key "$fingerprint" \
                 "$("${rsa-false}" && echo rsa4096 || echo ed25519)" auth 0
+        ykpgp_set_uids "$fingerprint"
         #What algorithms should the card be set to?
         ykpgp_set_algo $(gpg --with-colons --list-keys "$fingerprint"|awk -F: '
             /^[ps]ub:/ {
@@ -157,8 +193,14 @@ ykpgp_init() {
             "$("${rsa-false}" && echo rsa4096 || echo ed25519)"
         replace="$(gpg --with-colons --card-status \
             | grep -qxF fpr:::: || echo y)"
+        serialno="$(gpg --with-colons --card-status \
+            | awk -F: '/^serial:/ { print $2 }')"
         ykpgp_gpg_commands --card-edit \
-            admin generate n $replace 0 y "$NAME" "$EMAIL" ""
+            admin generate n $replace 0 y \
+                "$(echo "$uids" | sed '1!d;s/ <[^>]*>$//')" \
+                "$(echo "$uids" | sed '1!d;s/.* <\([^>]*\)>$/\1/')" \
+                ""
+        ykpgp_set_uids "$(ykpgp_get_card_fingerprint "$serialno")"
     fi
 }
 
@@ -170,9 +212,11 @@ ykpgp_reset() {
 ykpgp() {
     [ "$#" -gt 0 ] || set -- help
     [ "$1" != --help ] || set -- help
-    while getopts 'hn' OPT "$@"; do
+    unset uids
+    while getopts 'hi:n' OPT "$@"; do
         case "$OPT" in
             h) set -- help; OPTIND=1 ;;
+            i) uids="${uids-}$(printf "${uids+\\n}%s" "$OPTARG")" ;;
             n) ykpgp_use_temp_gnupghome ;;
         esac
     done
