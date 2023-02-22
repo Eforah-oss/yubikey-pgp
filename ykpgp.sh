@@ -34,8 +34,9 @@ ykpgp_gpg_commands() { #1: fingerprint or --card-edit
             $([ "$1" = --card-edit ] || echo --key-edit) "$1"
 }
 
-ykpgp_get_gpg_fingerprint() {
-    set -- "$(gpg --fingerprint "$1" | sed -n '/^\s/{s/\s\s*//g;p;q}')"
+ykpgp_get_gpg_fingerprint() { #1: uid
+    set -- "$(gpg --with-colons --list-secret-keys "$1" \
+        | awk -F: '/^fpr:/ { print $10; exit; }')"
     [ -n "$1" ] || return 1
     echo "$1"
 }
@@ -97,8 +98,7 @@ ykpgp_init() {
     shift $(( $OPTIND - 1 )); OPTIND=1
     ykpgp_ensure_name
     #Splitting given and surname is imperfect, so only set if unset
-    if [ "$(gpg --card-status \
-            | sed -n 's/Name of cardholder: //p')" = "[not set]" ]; then
+    if gpg --with-colons --card-status | grep -qFx name:::; then
         us="$(printf '\037')"; #ASCII Unit Separator
         split_name="$(echo "$NAME" \
             | sed 's/ \(\([^[:upper:]]* \)*[[:upper:]][^ ]*\)$/'"$us"'\1/')"
@@ -111,35 +111,40 @@ ykpgp_init() {
             || gpg --quick-gen-key "$NAME <$EMAIL>" \
                 "$("${rsa-false}" && echo rsa4096 || echo ed25519)" sign,cert 0
         fingerprint="$(ykpgp_get_gpg_fingerprint "$NAME <$EMAIL>")"
-        gpg --list-keys "$fingerprint" | grep -q '^sub.*\[E\]$' \
+        gpg --with-colons --list-secret-keys "$fingerprint" \
+            | awk -F: '$1 == "ssb" && $12 == "e" { f = 1 } END { exit !f }' \
             || gpg --quick-add-key "$fingerprint" \
                 "$("${rsa-false}" && echo rsa4096 || echo cv25519)" encr 0
-        gpg --list-keys "$fingerprint" | grep -q '^sub.*\[A\]$' \
+        gpg --with-colons --list-secret-keys "$fingerprint" \
+            | awk -F: '$1 == "ssb" && $12 == "a" { f = 1 } END { exit !f }' \
             || gpg --quick-add-key "$fingerprint" \
                 "$("${rsa-false}" && echo rsa4096 || echo ed25519)" auth 0
         #What algorithms should the card be set to?
-        ykpgp_set_algo $(gpg --list-keys "$fingerprint" | awk '
-            /^[ps]ub/ { a[substr($4, 2, length($4) - 2)] = $2; }
-            END { print a["SC"] " " a["E"] " " a["A"] }
+        ykpgp_set_algo $(gpg --with-colons --list-keys "$fingerprint"|awk -F: '
+            /^[ps]ub:/ {
+                a[index($12, "sc") ? "s" : $12] = ($4 == 1 ? "rsa" $3 : $17)
+            }
+            END { print a["s"] " " a["e"] " " a["a"]; }
         ')
         #Which subkey index do the [E] and [A] key have?
-        order="$(gpg --list-keys "$fingerprint" | awk '
-            /^sub/ { c += 1; a[substr($4, 2, length($4) - 2)] = c; }
-            END { print a["E"] " " a["A"] }
+        order="$(gpg --with-colons --list-keys "$fingerprint" | awk -F: '
+            /^sub:/ { c += 1; a[$12] = c; }
+            END { print a["e"] " " a["a"]; }
         ')"
         #'Move' the keys. Make that a copy by backing up the private keys
         backup="$(gpg --export-secret-keys --armor "$fingerprint")"
+        cardstatus="$(gpg --with-colons --card-status)"
         ykpgp_gpg_commands "$fingerprint" \
-            "key 0" keytocard y 1 $(gpg --card-status \
-                | grep -q '^S[^:]*key[. ]*: \[none\]$' || echo y) \
-            "key ${order% *}" keytocard 2 $(gpg --card-status \
-                | grep -q '^E[^:]*key[. ]*: \[none\]$' || echo y) \
+            "key 0" keytocard y 1 \
+                $(echo "$cardstatus" | grep -xq 'fpr::[^:]*:[^:]*:' || echo y)\
+            "key ${order% *}" keytocard 2 \
+                $(echo "$cardstatus" | grep -xq 'fpr:[^:]*::[^:]*:' || echo y)\
             "key 0" \
-            "key ${order#* }" keytocard 3 $(gpg --card-status \
-                | grep -q '^A[^:]*key[. ]*: \[none\]$' || echo y)
+            "key ${order#* }" keytocard 3 \
+                $(echo "$cardstatus" | grep -xq 'fpr:[^:]*:[^:]*::' || echo y)
         #Delete key stubs to re add the private keys
-        gpg --list-secret-keys --with-keygrip "$fingerprint" \
-            | sed -n 's/^\s*Keygrip = //p' \
+        gpg --with-colons --list-secret-keys "$fingerprint" \
+            | awk -F: '/^grp:/ { print $10 }' \
             | while read -r keygrip; do
                 gpg-connect-agent "delete_key --force $keygrip" /bye
             done
@@ -150,8 +155,8 @@ ykpgp_init() {
             "$("${rsa-false}" && echo rsa4096 || echo ed25519)" \
             "$("${rsa-false}" && echo rsa4096 || echo cv25519)" \
             "$("${rsa-false}" && echo rsa4096 || echo ed25519)"
-        replace="$(gpg --card-status | sed -n '/^\s*created ....:/{a\y
-            }')"
+        replace="$(gpg --with-colons --card-status \
+            | grep -qxF fpr:::: || echo y)"
         ykpgp_gpg_commands --card-edit \
             admin generate n $replace 0 y "$NAME" "$EMAIL" ""
     fi
