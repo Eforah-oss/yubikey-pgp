@@ -52,6 +52,13 @@ ykpgp_get_card_fingerprint() { #1: serialno
     echo "$1"
 }
 
+ykpgp_get_gpg_keyid() { #1: fingerprint
+    set -- "$(gpg --with-colons --list-secret-keys "$1" \
+        | awk -F: '/^sec/ { print $5; exit; }')"
+    [ -n "$1" ] || return 1
+    echo "$1"
+}
+
 ykpgp_set_algo() { #1: S_algo E_algo A_algo
     #Set key algorithm only if necessary to avoid pin dialogs
     if ! gpg --card-status | grep -qxF "Key attributes ...: $1 $2 $3"; then
@@ -78,6 +85,15 @@ ykpgp_set_uids() { #1: fingerprint
         || gpg --quick-set-primary-uid "$1" "$2"
 }
 
+ykpgp_enable_git() { #1: git_config 2: fingerprint
+    ykpgp_ensure_name
+    git config "$1" commit.gpgsign true
+    if ! echo "$uids" | grep -qxF \
+            "$(git config user.name) <$(git config user.email)>"; then
+        git config "$1" user.signingkey "$(ykpgp_get_gpg_keyid "$2")"
+    fi
+}
+
 ykpgp_help() {
     printf '%s\n' \
         'Usage: ykpgp [options...] <command>' \
@@ -89,6 +105,8 @@ ykpgp_help() {
         '  -i <uid>  Add uid (e.g., `name <mail@example.com`) to key' \
         '            Can be specified multiple times. First is primary' \
         '            If none are given, default is "$NAME <$EMAIL>"' \
+        '  -g        Set up open git repository for commit signing' \
+        '  -G        Set up git for commit signing' \
         '' \
         'Commands:' \
         '  register  Import keys from YubiKey for use with gpg' \
@@ -115,12 +133,15 @@ ykpgp_register() {
     #Adds the [A] (auth) subkey
     gpg --faked-system-time "$date" --quick-add-key "$fingerprint" card auth
     ykpgp_set_uids "$fingerprint"
+    [ -z "${git_config-}" ] || ykpgp_enable_git "$git_config" "$fingerprint"
 }
 
 ykpgp_init() {
     unset rsa
-    while getopts 'i:knr' OPT "$@"; do
+    while getopts 'gGi:knr' OPT "$@"; do
         case "$OPT" in
+            g) git_config="--local" ;;
+            G) git_config="--global" ;;
             i) uids="${uids-}$(printf "${uids+\\n}%s" "$OPTARG")" ;;
             k) stored_keyring_key=true ;;
             n) ykpgp_use_temp_gnupghome ;;
@@ -223,6 +244,7 @@ ykpgp_init() {
         ykpgp_set_uids "$(ykpgp_get_card_fingerprint "$serialno")"
         ykpgp_gpg_commands --card-edit admin passwd 1 3 Q
     fi
+    [ -z "${git_config-}" ] || ykpgp_enable_git "$git_config" "$fingerprint"
 }
 
 ykpgp_reset() {
@@ -233,9 +255,11 @@ ykpgp_reset() {
 ykpgp() {
     [ "$#" -gt 0 ] || set -- help
     [ "$1" != --help ] || set -- help
-    unset uids
-    while getopts 'hi:n' OPT "$@"; do
+    unset uids git_config
+    while getopts 'gGhi:n' OPT "$@"; do
         case "$OPT" in
+            g) git_config="--local" ;;
+            G) git_config="--global" ;;
             h) set -- help; OPTIND=1 ;;
             i) uids="${uids-}$(printf "${uids+\\n}%s" "$OPTARG")" ;;
             n) ykpgp_use_temp_gnupghome ;;
