@@ -9,6 +9,31 @@ confirm() ( #1: prompt
     [ "$REPLY" = y ]
 )
 
+gpg_connect_agent() { gpg-connect-agent "$@"; }
+
+ykpgp_ensure_wsl_gpg() {
+    grep -iq microsoft /proc/version 2>/dev/null || return 0
+    #For the case when it's just installed
+    if ! command -v gpg.exe >/dev/null 2>&1; then
+        printf "ERROR: missing gpg. Run `make deps` / `choco install gnupg`">&2
+        die "If you installed it this boot, restart your computer."
+    fi
+    gpg() { gpg.exe "$@"; }
+    gpgconf() { gpgconf.exe "$@"; }
+    gpg_connect_agent() { gpg-connect-agent.exe "$@"; }
+    git() { git.exe "$@"; }
+}
+
+ykpgp_pinentry_message() {
+    gpg_connect_agent "get_confirmation $(echo "$@" | {
+        if grep -iq microsoft /proc/version 2>/dev/null; then
+            sed 's/$/%20/;s/ /%20/g' | tr -d \\n
+        else
+            sed 's/$/%0A/;s/ /%20/g' | tr -d \\n
+        fi
+    })" /bye
+}
+
 ykpgp_ensure_name() {
     [ -z "${uids-}" ] || return 0
     if [ -z "${NAME-}" ]; then
@@ -150,23 +175,30 @@ ykpgp_init() {
     done
     shift $(( $OPTIND - 1 )); OPTIND=1
     ykpgp_ensure_name
-    gpg-connect-agent "get_confirmation $({
-        printf '%s%%0A' \
-            'ykpgp will now set up your YubiKey. You will be asked for' \
-            'your PIN and Admin PIN multiple times.' \
-            'These are the default values:' \
-            '' \
-            '  - PIN: 123456' \
-            '  - Admin PIN: 12345678' \
-            '' \
-            'After generating/copying the keys it will ask you to set' \
-            'up new PINs for this YubiKey. Remember those.'
-        ! "${stored_keyring_key-false}" || printf '%s%%0A' \
-            '' \
-            'If you already have a keypair, you will also be asked for' \
-            'its passphrase multiple times. Otherwise, make up ' \
-            'something long and safe if you plan on saving the keypair.'
-    } | sed 's/ /%20/g')" /bye
+    pin_message="$(printf '%s\n' \
+        'ykpgp will now set up your YubiKey. You will be asked for' \
+        'your (Admin) PIN multiple times. These are the default' \
+        'values:' \
+        '' \
+        '  - PIN: 123456' \
+        '  - Admin PIN: 12345678' \
+        '' \
+        'After generating/copying the keys it will ask you to set' \
+        'up new PINs for this YubiKey. Remember those.')"
+    passphrase_message="$(printf '%s\n' \
+        'If you already have a keypair, you will also be asked for' \
+        'its passphrase multiple times. Otherwise, make up' \
+        'something long and safe if you plan on saving the keypair.'
+    )"
+    if grep -iq microsoft /proc/version 2>/dev/null; then
+        ykpgp_pinentry_message "$pin_message"
+        ! "${stored_keyring_key-false}" \
+            || ykpgp_pinentry_message "$passphrase_message"
+    else
+        ykpgp_pinentry_message "$(echo "$pin_message" \
+            && "${stored_keyring_key-false}" \
+            && echo && echo "$passphrase_message" ||:)"
+    fi
     #Try setting up kdf. Not worth bothering the user over if card is not reset
     ykpgp_gpg_commands --card-edit admin kdf-setup ||:
     #Splitting given and surname is imperfect, so only set if unset
@@ -223,7 +255,7 @@ ykpgp_init() {
         gpg --with-colons --list-secret-keys "$fingerprint" \
             | awk -F: '/^grp:/ { print $10 }' \
             | while read -r keygrip; do
-                gpg-connect-agent "delete_key --force $keygrip" /bye
+                gpg_connect_agent "delete_key --force $keygrip" /bye
             done
         #Reload keys so gpg does not stay in the 'keys are on card' state
         echo "$backup" | gpg --import
@@ -268,6 +300,7 @@ ykpgp() {
     shift $(( $OPTIND - 1 )); OPTIND=1
     mkdir -p "$GNUPGHOME"
     chmod og-rwx "$GNUPGHOME"
+    ykpgp_ensure_wsl_gpg
     case "$1" in
         help) shift 1; ykpgp_help ;;
         register) shift 1; ykpgp_register "$@" ;;
