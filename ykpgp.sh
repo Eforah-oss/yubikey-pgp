@@ -129,6 +129,23 @@ ykpgp_init() {
     done
     shift $(( $OPTIND - 1 )); OPTIND=1
     ykpgp_ensure_name
+    gpg-connect-agent "get_confirmation $({
+        printf '%s%%0A' \
+            'ykpgp will now set up your YubiKey. You will be asked for' \
+            'your PIN and Admin PIN multiple times.' \
+            'These are the default values:' \
+            '' \
+            '  - PIN: 123456' \
+            '  - Admin PIN: 12345678' \
+            '' \
+            'After generating/copying the keys it will ask you to set' \
+            'up new PINs for this YubiKey. Remember those.'
+        ! "${stored_keyring_key-false}" || printf '%s%%0A' \
+            '' \
+            'If you already have a keypair, you will also be asked for' \
+            'its passphrase multiple times. Otherwise, make up ' \
+            'something long and safe if you plan on saving the keypair.'
+    } | sed 's/ /%20/g')" /bye
     #Try setting up kdf. Not worth bothering the user over if card is not reset
     ykpgp_gpg_commands --card-edit admin kdf-setup ||:
     #Splitting given and surname is imperfect, so only set if unset
@@ -180,13 +197,14 @@ ykpgp_init() {
             "key 0" \
             "key ${order#* }" keytocard 3 \
                 $(echo "$cardstatus" | grep -xq 'fpr:[^:]*:[^:]*::' || echo y)
+        ykpgp_gpg_commands --card-edit admin passwd 1 3 Q
         #Delete key stubs to re add the private keys
         gpg --with-colons --list-secret-keys "$fingerprint" \
             | awk -F: '/^grp:/ { print $10 }' \
             | while read -r keygrip; do
                 gpg-connect-agent "delete_key --force $keygrip" /bye
             done
-        #Reload gpg-agent so it does not keep the 'keys are on card' state
+        #Reload keys so gpg does not stay in the 'keys are on card' state
         echo "$backup" | gpg --import
     else
         ykpgp_set_algo \
@@ -203,6 +221,7 @@ ykpgp_init() {
                 "$(echo "$uids" | sed '1!d;s/.* <\([^>]*\)>$/\1/')" \
                 ""
         ykpgp_set_uids "$(ykpgp_get_card_fingerprint "$serialno")"
+        ykpgp_gpg_commands --card-edit admin passwd 1 3 Q
     fi
 }
 
