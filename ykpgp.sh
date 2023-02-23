@@ -129,6 +129,8 @@ ykpgp_init() {
     done
     shift $(( $OPTIND - 1 )); OPTIND=1
     ykpgp_ensure_name
+    #Try setting up kdf. Not worth bothering the user over if card is not reset
+    ykpgp_gpg_commands --card-edit admin kdf-setup ||:
     #Splitting given and surname is imperfect, so only set if unset
     if gpg --with-colons --card-status | grep -qFx name:::; then
         us="$(printf '\037')"; #ASCII Unit Separator
