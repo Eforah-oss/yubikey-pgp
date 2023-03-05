@@ -119,6 +119,42 @@ ykpgp_enable_git() { #1: git_config 2: fingerprint
     fi
 }
 
+ykpgp_enable_ssh() { #1: fingerprint
+    gpgconf --list-options gpg-agent \
+        | awk -F: '/^enable-ssh-support/ { exit ! $10 }' \
+        || echo 'enable-ssh-support:1:1' | gpgconf --change-options gpg-agent \
+        >/dev/null
+    grip="$(gpg --with-colons --list-secret-keys "$1" | awk -F: '
+        $1 ~ /s[us]b/ && $12 ~ /a/ { auth = 1 }
+        $1 == "grp" && auth == 1 { print $10; exit }
+    ')"
+    [ -n "$grip" ] || die "Couldn't add key to sshcontrol"
+    grep -qxF "$grip" "$(gpgconf --list-dirs homedir)/sshcontrol" 2>/dev/null \
+        || echo "$grip" >>"$(gpgconf --list-dirs homedir)/sshcontrol"
+    if grep -iq microsoft /proc/version 2>/dev/null; then
+        echo "WARNING: system-wide ssh setup is not supported on Windows" >&2
+        return 0
+    fi
+    #Check whether it is already added by reloading profile. Might be run twice
+    ! expr "$("$SHELL" -lc "printenv SSH_AUTH_SOCK")" : '.*gpg-agent' \
+        >/dev/null || return 0
+    case "$SHELL" in
+    */bash)
+        #Match bash in finding file, first is also last as default to write to
+        for profile in .bash_profile .bash_login .profile .bash_profile; do
+            ! [ -r "$HOME/$profile" ] || break
+        done
+        echo 'export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"' \
+            >>"$HOME/$profile"
+        ;;
+    */zsh)
+        echo 'export SSH_AUTH_SOCK="$(gpgconf --list-dirs agent-ssh-socket)"' \
+            >>"$("$SHELL" -lc 'printf "%s" "${ZDOTDIR-$HOME}"')/.zprofile"
+        ;;
+    *) echo "WARNING: could not add SSH_AUTH_SOCK to your profile" >&2 ;;
+    esac
+}
+
 ykpgp_help() {
     printf '%s\n' \
         'Usage: ykpgp [options...] <command>' \
@@ -132,6 +168,8 @@ ykpgp_help() {
         '            If none are given, default is "$NAME <$EMAIL>"' \
         '  -g        Set up open git repository for commit signing' \
         '  -G        Set up git for commit signing' \
+        '  -s        Add key to possible ssh identities, and set up' \
+        '            your shell profile so ssh uses gpg.' \
         '' \
         'Commands:' \
         '  register  Import keys from YubiKey for use with gpg' \
@@ -159,11 +197,12 @@ ykpgp_register() {
     gpg --faked-system-time "$date" --quick-add-key "$fingerprint" card auth
     ykpgp_set_uids "$fingerprint"
     [ -z "${git_config-}" ] || ykpgp_enable_git "$git_config" "$fingerprint"
+    ! "${enable_ssh-false}" || ykpgp_enable_ssh "$fingerprint"
 }
 
 ykpgp_init() {
     unset rsa
-    while getopts 'gGi:knr' OPT "$@"; do
+    while getopts 'gGi:knrs' OPT "$@"; do
         case "$OPT" in
             g) git_config="--local" ;;
             G) git_config="--global" ;;
@@ -171,6 +210,7 @@ ykpgp_init() {
             k) stored_keyring_key=true ;;
             n) ykpgp_use_temp_gnupghome ;;
             r) rsa=true ;;
+            s) enable_ssh=true ;;
         esac
     done
     shift $(( $OPTIND - 1 )); OPTIND=1
@@ -277,6 +317,7 @@ ykpgp_init() {
         ykpgp_gpg_commands --card-edit admin passwd 1 3 Q
     fi
     [ -z "${git_config-}" ] || ykpgp_enable_git "$git_config" "$fingerprint"
+    ! "${enable_ssh-false}" || ykpgp_enable_ssh "$fingerprint"
 }
 
 ykpgp_reset() {
@@ -287,14 +328,15 @@ ykpgp_reset() {
 ykpgp() {
     [ "$#" -gt 0 ] || set -- help
     [ "$1" != --help ] || set -- help
-    unset uids git_config
-    while getopts 'gGhi:n' OPT "$@"; do
+    unset git_config enable_ssh uids
+    while getopts 'gGhi:ns' OPT "$@"; do
         case "$OPT" in
             g) git_config="--local" ;;
             G) git_config="--global" ;;
             h) set -- help; OPTIND=1 ;;
             i) uids="${uids-}$(printf "${uids+\\n}%s" "$OPTARG")" ;;
             n) ykpgp_use_temp_gnupghome ;;
+            s) enable_ssh=true ;;
         esac
     done
     shift $(( $OPTIND - 1 )); OPTIND=1
