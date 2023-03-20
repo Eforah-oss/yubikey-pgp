@@ -329,6 +329,7 @@ ykpgp() {
     [ "$#" -gt 0 ] || set -- help
     [ "$1" != --help ] || set -- help
     unset git_config enable_ssh uids
+    export GNUPGHOME="${GNUPGHOME-$(gpgconf --list-dirs homedir)}"
     while getopts 'gGhi:ns' OPT "$@"; do
         case "$OPT" in
             g) git_config="--local" ;;
