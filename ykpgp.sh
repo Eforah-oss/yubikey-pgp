@@ -313,7 +313,8 @@ ykpgp_init() {
                 "$(echo "$uids" | sed '1!d;s/ <[^>]*>$//')" \
                 "$(echo "$uids" | sed '1!d;s/.* <\([^>]*\)>$/\1/')" \
                 ""
-        ykpgp_set_uids "$(ykpgp_get_card_fingerprint "$serialno")"
+        fingerprint="$(ykpgp_get_card_fingerprint "$serialno")"
+        ykpgp_set_uids "$fingerprint"
         ykpgp_gpg_commands --card-edit admin passwd 1 3 Q
     fi
     [ -z "${git_config-}" ] || ykpgp_enable_git "$git_config" "$fingerprint"
