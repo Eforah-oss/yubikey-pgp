@@ -24,6 +24,20 @@ ykpgp_ensure_wsl_gpg() {
     git() { git.exe "$@"; }
 }
 
+ykpgp_ensure_pinentry() {
+    export GPG_TTY="${GPG_TTY-$(tty)}"
+    if [ "$(uname -s)" = Darwin ] \
+            && ! gpgconf -X | grep -q pinentry-program \
+            && command -v pinentry-mac >/dev/null 2>&1; then
+        #For some reason gpgconf does not do pinentry-program, both r/w
+        set -- "$(mktemp)"
+        {
+            printf 'pinentry-program %s\n' "$(command -v pinentry-mac)"
+            cat "$GNUPGHOME/gpg-agent.conf" 2>/dev/null ||:
+        } >"$1" && cp "$1" "$GNUPGHOME/gpg-agent.conf" && rm "$1"
+    fi
+}
+
 ykpgp_pinentry_message() {
     gpg_connect_agent "get_confirmation $(echo "$@" | {
         if grep -iq microsoft /proc/version 2>/dev/null; then
@@ -180,6 +194,7 @@ ykpgp_help() {
 }
 
 ykpgp_register() {
+    ykpgp_ensure_pinentry
     ykpgp_ensure_name
     #First running gpg --card-status accomplishes 2 goals. First, it keeps the
     #id of the key the same by reusing the creation time. It also avoids a
@@ -214,6 +229,7 @@ ykpgp_init() {
         esac
     done
     shift $(( $OPTIND - 1 )); OPTIND=1
+    ykpgp_ensure_pinentry
     ykpgp_ensure_name
     pin_message="$(printf '%s\n' \
         'ykpgp will now set up your YubiKey. You will be asked for' \
