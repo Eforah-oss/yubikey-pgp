@@ -200,8 +200,8 @@ ykpgp_register() {
     #id of the key the same by reusing the creation time. It also avoids a
     #`Key generation failed: No such file or directory` error when trying to
     #add the key.
-    date="$(gpg --card-status | sed -n '/^\s*created ....: /{
-        s/.*\([-0-9 :]\{19\}\)$/\1/;s/ /T/;s/$/!/;s/[-:]//g;p;q}')"
+    date="$(gpg --card-status | sed -n '/^ *created ....: /{
+        s/.*\([-0-9 :]\{19\}\)$/\1/;s/ /T/;s/$/!/;s/[-:]//g;p;q;}')"
     [ -n "$date" ] || die "Could not find keys on card"
     #Adds the [SC] (meaning sign and certify) key and [E] (encryption) subkey
     gpg --faked-system-time "$date" --quick-gen-key \
