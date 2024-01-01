@@ -150,7 +150,7 @@ ykpgp_enable_ssh() { #1: fingerprint
         return 0
     fi
     #Check whether it is already added by reloading profile. Might be run twice
-    ! expr "$("$SHELL" -lc "printenv SSH_AUTH_SOCK")" : '.*gpg-agent' \
+    ! expr "$("$SHELL" -lic "printenv SSH_AUTH_SOCK")" : '.*gpg-agent' \
         >/dev/null || return 0
     case "$SHELL" in
     */bash)
