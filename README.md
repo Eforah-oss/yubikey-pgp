@@ -4,6 +4,13 @@ Easily use your Yubikey with `git` and `ssh` without manual configuration:
 yubikey-pgp is a wrapper for OpenPGP operations with your YubiKey without
 having to deal with gpg.
 
+### Why?
+
+YubiKeys are great for 2 factor authentication in browsers, but using them for
+signing commits and SSH directly is also possible. But that means dealing with
+GPG, which is quite user-unfriendly in my opinion. This utility automates all
+the setup.
+
 ### Installation
 
 If you put your binaries in `~/.local/bin`:
