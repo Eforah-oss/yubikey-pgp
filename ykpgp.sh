@@ -174,11 +174,18 @@ ykpgp_enable_ssh() { #1: fingerprint
 
 ykpgp_help() {
     printf '%s\n' \
-        'Usage: ykpgp [options...] <command>' \
+        'Usage: ykpgp <command> [options...]' \
         '' \
         'Manage YubiKey OpenPGP keys using gpg' \
         '' \
-        'Options:' \
+        'Commands:' \
+        '  register  Import keys from YubiKey for use with gpg' \
+        '  init      Initialise the YubiKey' \
+        '    -r      Create RSA keys instead of ECC' \
+        '    -k      Use stored keypair' \
+        '  reset     Clear (factory-reset) all OpenPGP data on YubiKey' \
+        '' \
+        'Options (for init and register):' \
         '  -n        Use temporary GNUPGHOME. Mostly for testing' \
         '  -i <uid>  Add uid (e.g., `name <mail@example.com`) to key' \
         '            Can be specified multiple times. First is primary' \
@@ -186,17 +193,23 @@ ykpgp_help() {
         '  -g        Set up open git repository for commit signing' \
         '  -G        Set up git for commit signing' \
         '  -s        Add key to possible ssh identities, and set up' \
-        '            your shell profile so ssh uses gpg.' \
-        '' \
-        'Commands:' \
-        '  register  Import keys from YubiKey for use with gpg' \
-        '  init      Initialise the YubiKey' \
-        '    -r      Create RSA keys instead of ECC' \
-        '    -k      Use stored keypair' \
-        '  reset     Clear (factory-reset) all OpenPGP data on YubiKey'
+        '            your shell profile so ssh uses gpg.'
 }
 
 ykpgp_register() {
+    while getopts 'gGi:knrs' OPT "$@"; do
+        case "$OPT" in
+        g) git_config="--local" ;;
+        G) git_config="--global" ;;
+        i) uids="${uids-}$(printf "${uids+\\n}%s" "$OPTARG")" ;;
+        k) echo 'NOTE: register ignores -k. You used this with init?' >&2 ;;
+        n) ykpgp_use_temp_gnupghome ;;
+        r) echo 'NOTE: register ignores -r. RSA was chosen on init?' >&2 ;;
+        s) enable_ssh=true ;;
+        *) die "ERROR: unknown option $OPT" ;;
+        esac
+    done
+    shift $(($OPTIND - 1)) && OPTIND=1
     ykpgp_ensure_pinentry
     ykpgp_ensure_name
     #First running gpg --card-status accomplishes 2 goals. First, it keeps the
@@ -229,6 +242,7 @@ ykpgp_init() {
         n) ykpgp_use_temp_gnupghome ;;
         r) rsa=true ;;
         s) enable_ssh=true ;;
+        *) die "ERROR: unknown option $OPT" ;;
         esac
     done
     shift $(($OPTIND - 1)) && OPTIND=1
@@ -352,18 +366,17 @@ ykpgp() {
     [ "$1" != --help ] || set -- help
     unset git_config enable_ssh uids
     export GNUPGHOME="${GNUPGHOME-$(gpgconf --list-dirs homedir)}"
-    while getopts 'gGhi:ns' OPT "$@"; do
+    while getopts 'gGhi:knrs' OPT "$@"; do
         case "$OPT" in
-        g) git_config="--local" ;;
-        G) git_config="--global" ;;
         h) set -- help && OPTIND=1 ;;
-        i) uids="${uids-}$(printf "${uids+\\n}%s" "$OPTARG")" ;;
-        n) ykpgp_use_temp_gnupghome ;;
-        s) enable_ssh=true ;;
+        #Just push the options back to the stack
+        #Not documented on purpose, but might as well for now
+        g | G | k | n | r | s) set -- "$@" "-$OPT" ;;
+        i) set -- "$@" "-$OPT" "$OPTARG" ;;
+        *) die "ERROR: unknown option $OPT" ;;
         esac
     done
-    shift $(($OPTIND - 1))
-    OPTIND=1
+    shift $(($OPTIND - 1)) && OPTIND=1
     mkdir -p "$GNUPGHOME"
     chmod og-rwx "$GNUPGHOME"
     ykpgp_ensure_wsl_gpg

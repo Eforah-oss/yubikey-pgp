@@ -33,6 +33,12 @@ These two subcommands have a few options in common:
 - `-s` Add key to possible ssh identities, and set up your shell profile so ssh
   uses gpg.
 
+Only `init` actually uses these options, and they cannot be set after the fact:
+
+- `-r` Use RSA keys instead of ED25519. For compatibility with older systems.
+  You'll probably know it when you need this.
+- `-k` See the next header.
+
 ### On initializing your YubiKey with `-k`
 
 `init` also has the option (for more advanced users) to use keys from the GPG
@@ -69,3 +75,45 @@ existing keys unless you're comfortable with handling keys using the GPG
 interface. Generating a key, adding it to multiple YubiKeys and then backing it
 up is what I would recommend if you're just starting out and don't want to deal
 with multiple public keys for yourself.
+
+### Examples
+
+How you'd use this to create a key on the Yubikey itself, and use it with SSH
+and Git on your current host:
+
+```sh
+ykpgp init -sG -i "Joe Cooper <joe.cooper@nasa.gov"
+```
+
+The `s` does the SSH initialization, the `G` Git, and you can simply replace
+`init` with `register` on another computer to use your key.
+
+Don't worry, SSH and Git can always be registered later, it's not a property of
+the key, so you don't actually **need** to initialize your YubiKey this way.
+
+```sh
+ykpgp register -sG -i "Joe Cooper <joe.cooper@nasa.gov"
+```
+
+Just replacing init with register even works with more complicated uses such as
+the following:
+
+```sh
+# Insert first YubiKey
+ykpgp init -ksG -i"Joe Cooper <j.cooper@nasa.gov" -i"Joe <joseph@example.com>"
+# Remove the first, and insert your second YubiKey
+ykpgp init -ksG -i"Joe Cooper <j.cooper@nasa.gov" -i"Joe <joseph@example.com>"
+# Make a backup
+gpg --export-secret-keys --armor >/mnt/usb/backup.gpg
+```
+
+This example illustrates both:
+
+- Multiple YubiKeys with the same key with `-k`.
+- Multiple identities bound to a key.
+
+These features can be used independently of each other.
+
+### Bugs
+
+I don't think this works in the WSL.
