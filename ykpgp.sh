@@ -344,7 +344,7 @@ ykpgp_init() {
         serialno="$(gpg --with-colons --card-status \
             | awk -F: '/^serial:/ { print $2 }')"
         ykpgp_gpg_commands --card-edit \
-            admin generate n $replace 0 y \
+            admin generate n $replace 0 \
             "$(echo "$uids" | sed '1!d;s/ <[^>]*>$//')" \
             "$(echo "$uids" | sed '1!d;s/.* <\([^>]*\)>$/\1/')" \
             ""
