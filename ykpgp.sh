@@ -219,14 +219,17 @@ ykpgp_register() {
     date="$(gpg --card-status | sed -n '/^ *created ....: /{
         s/.*\([-0-9 :]\{19\}\)$/\1/;s/ /T/;s/$/!/;s/[-:]//g;p;q;}')"
     [ -n "$date" ] || die "Could not find keys on card"
+    #Temporary name for adding multiple keys with the same uid
+    tempname="$(LC_ALL=C </dev/urandom tr -dc "[:alnum:]" | head -c 32)"
     #Adds the [SC] (meaning sign and certify) key and [E] (encryption) subkey
     gpg --faked-system-time "$date" --quick-gen-key \
-        "$(echo "$uids" | head -n 1)" card
-    fingerprint="$(ykpgp_get_gpg_fingerprint "$(echo "$uids" | head -n1)")"
+        "$tempname" card
+    fingerprint="$(ykpgp_get_gpg_fingerprint "$tempname")"
     gpg --quick-set-expire "$fingerprint" 0
     #Adds the [A] (auth) subkey
     gpg --faked-system-time "$date" --quick-add-key "$fingerprint" card auth
     ykpgp_set_uids "$fingerprint"
+    gpg --quick-revuid "$tempname" "$tempname"
     [ -z "${git_config-}" ] || ykpgp_enable_git "$git_config" "$fingerprint"
     ! "${enable_ssh-false}" || ykpgp_enable_ssh "$fingerprint"
 }
