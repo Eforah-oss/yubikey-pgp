@@ -130,9 +130,13 @@ ykpgp_set_uids() { #1: fingerprint
 ykpgp_enable_git() { #1: git_config 2: fingerprint
     ykpgp_ensure_name
     git config "$1" commit.gpgsign true
-    if ! echo "$uids" | grep -qxF \
-        "$(git config user.name) <$(git config user.email)>"; then
+    if
+        ! echo "$uids" | grep -qxF \
+            "$(git config "$1" user.name) <$(git config "$1" user.email)>"
+    then
         git config "$1" user.signingkey "$(ykpgp_get_gpg_keyid "$2")"
+    else
+        git config "$1" gpg.program ykpgp-present-wrapper
     fi
 }
 

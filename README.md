@@ -35,8 +35,10 @@ These two subcommands have a few options in common:
 - `-i <uid>` Add uid (e.g., `name <mail@example.com`) to key. Can be specified
   multiple times. First is primary. If none are given, default is
   "$NAME <$EMAIL>"
-- `-g` Set up open git repository for commit signing
-- `-G` Set up git for commit signing
+- `-G` Set up git for commit signing with this key. In detail: set
+  `commit.gpgsign`, and add a helper as `gpg.program` if your key kan be found
+  via git/gpg uid match or hardcode the keyid otherwise.
+- `-g` Do the same for _just_ the currently open repository.
 - `-s` Add key to possible ssh identities, and set up your shell profile so ssh
   uses gpg.
 
