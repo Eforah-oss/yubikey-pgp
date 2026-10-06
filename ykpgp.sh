@@ -129,14 +129,32 @@ ykpgp_set_uids() { #1: fingerprint
 
 ykpgp_enable_git() { #1: git_config 2: fingerprint
     ykpgp_ensure_name
-    git config "$1" commit.gpgsign true
+    if [ "$1" = --global ]; then
+        set -- "$1" "$2" "${GIT_CONFIG_GLOBAL:-$HOME/.gitconfig}"
+        if
+            [ -z "${GIT_CONFIG_GLOBAL-}" ] && [ ! -f "$3" ] \
+                && [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/git/config" ]
+        then
+            set -- "$1" "$2" "${XDG_CONFIG_HOME:-$HOME/.config}/git/config"
+        fi
+        case "${3##*/}" in
+        ?*.*) set -- "$1" "$2" "${3%.*}.ykpgp.${3##*.}" ;;
+        *) set -- "$1" "$2" "$3.ykpgp.ini" ;;
+        esac
+        git config --global --no-includes --get-all include.path \
+            | grep -qxF "${3##*/}" \
+            || git config --global --add include.path "${3##*/}"
+        set -- "$1" "$2" --file="$3"
+    fi
     if
         ! echo "$uids" | grep -qxF \
             "$(git config "$1" user.name) <$(git config "$1" user.email)>"
     then
-        git config "$1" user.signingkey "$(ykpgp_get_gpg_keyid "$2")"
+        git config "${3-$1}" commit.gpgsign true
+        git config "${3-$1}" user.signingkey "$(ykpgp_get_gpg_keyid "$2")"
     else
-        git config "$1" gpg.program ykpgp-present-wrapper
+        git config "${3-$1}" commit.gpgsign true
+        git config "${3-$1}" gpg.program ykpgp-present-wrapper
     fi
 }
 
